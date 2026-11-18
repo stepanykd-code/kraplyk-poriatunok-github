@@ -115,23 +115,30 @@ body[data-story="yes"] .power-panel{pointer-events:none}
  .card .primary,.leave-side,.comic-buttons button{min-height:44px}
  .comic-card canvas{max-height:min(38dvh,210px);object-fit:contain;background:#302948}
  .touch-controls{
+  --touch-size:clamp(54px,15vw,68px);
   position:absolute;display:flex;align-items:end;justify-content:space-between;
   bottom:var(--edge-bottom);left:var(--edge-left);right:var(--edge-right);z-index:2;pointer-events:none;
  }
  .overlay:not(.hidden) ~ .touch-controls{visibility:hidden}
- .touch-controls>div{display:flex;align-items:end;gap:5px}
+ .touch-controls>div{display:flex;align-items:end;gap:6px}
  .touch-controls button{
   display:inline-grid;place-items:center;pointer-events:auto;touch-action:none;user-select:none;
-  min-width:44px;min-height:44px;height:clamp(44px,8dvh,60px);padding:0 9px;
-  border:1px solid #fff6dca8;border-bottom:3px solid #435c51ad;border-radius:12px;
-  background:#283e37dc;color:#fff8df;font-size:13px;font-weight:750;white-space:nowrap;
+  min-width:var(--touch-size);height:var(--touch-size);padding:0 10px;
+  border:1px solid #fff6dca8;border-bottom:3px solid #435c51ad;border-radius:14px;
+  background:#283e37dc;color:#fff8df;font-size:21px;font-weight:750;white-space:nowrap;
  }
- .touch-controls .movement button{width:clamp(44px,8vw,60px);font-size:18px}
- .touch-controls #jumpButton{background:#80474bef}
+ .touch-controls #jumpButton{background:#80474bef;min-width:calc(var(--touch-size) + 24px);font-size:15px}
  .touch-controls .shoot{background:#564762ef}
  .touch-controls .shoot:disabled{display:none}
- .touch-controls button:active{filter:brightness(1.22);translate:0 1px}
+ .touch-controls button.pressed{filter:brightness(1.36);box-shadow:inset 0 0 0 2px #fff6dcb0}
+ @media (max-width:350px){
+  .touch-controls .actions{display:grid;grid-template-columns:repeat(2,max-content)}
+  .touch-controls .water-only{grid-area:1 / 2}
+  .touch-controls .shoot{grid-area:2 / 1}
+  .touch-controls #jumpButton{grid-area:2 / 2}
+ }
  @media (orientation:landscape){
+  .touch-controls{--touch-size:clamp(60px,16dvh,76px)}
   .game:fullscreen .playfield{width:100%}
   .game canvas#game{height:100vh;height:100dvh;aspect-ratio:auto}
  }
@@ -185,6 +192,8 @@ if(typeof ResizeObserver==='function')new ResizeObserver(resizeView).observe(can
 else addEventListener('resize',resizeView);
 const $=id=>document.getElementById(id),keys=new Set(),reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
 let mode='ready',cam=0,last=0,acc=0,t=0,visualT=0,score=0,particles=[],jumpQueued=false,muted=true,audio=null;
+const touchPointers=new Map(),TOUCH_BUFFER_TICKS=7;
+let touchJumpTicks=0,touchShotTicks=0;
 let specialBlocks=[],pickups=[],shots=[],totalDrops=20,environment='meadow',enemyTrial=false;
 const exitPipe={x:3260,width:92,doorTop:330,doorBottom:430};
 const exitPipeWalls=[
@@ -419,7 +428,7 @@ function chapterDrops(){
   return moved?[moved[2],moved[3]]:[x,y];
  });
 }
-function reset(){player={x:80,y:environment==='water'?235:380,w:34,h:51,vx:0,vy:0,ground:false,face:1,squash:0,coyote:0,step:0,form:'small',fire:false,invincible:0,magnet:0,hurt:0,slow:0,shotCD:0,muzzle:0,transform:0,knock:0,knockV:0,swimming:environment==='water',swimPhase:0,swimCD:0,stroke:0,tilt:0};drops=(story()?chapterDrops():enemyTrial?(environment==='water'?trialWaterDrops:trialLandDrops):(environment==='water'?waterDropPositions:dropPositions)).map(([x,y])=>({x,y,taken:false}));enemies=environment==='water'?makePlasmaEnemies():makeLandEnemies();enemyHazards=[];specialBlocks=makeSpecialBlocks();totalDrops=drops.length+specialBlocks.filter(b=>b.content==='drop').reduce((n,b)=>n+b.initial,0);pickups=[];shots=[];score=0;t=0;cam=0;particles=[];keys.clear();jumpQueued=false;hud()}
+function reset(){player={x:80,y:environment==='water'?235:380,w:34,h:51,vx:0,vy:0,ground:false,face:1,squash:0,coyote:0,step:0,form:'small',fire:false,invincible:0,magnet:0,hurt:0,slow:0,shotCD:0,muzzle:0,transform:0,knock:0,knockV:0,swimming:environment==='water',swimPhase:0,swimCD:0,stroke:0,tilt:0};drops=(story()?chapterDrops():enemyTrial?(environment==='water'?trialWaterDrops:trialLandDrops):(environment==='water'?waterDropPositions:dropPositions)).map(([x,y])=>({x,y,taken:false}));enemies=environment==='water'?makePlasmaEnemies():makeLandEnemies();enemyHazards=[];specialBlocks=makeSpecialBlocks();totalDrops=drops.length+specialBlocks.filter(b=>b.content==='drop').reduce((n,b)=>n+b.initial,0);pickups=[];shots=[];score=0;t=0;cam=0;particles=[];clearControls();hud()}
 function resizeHero(){
  const p=player,big=p.form==='big',w=big?46:34,h=big?72:51;
  if(p.w===w&&p.h===h)return;
@@ -515,6 +524,7 @@ function takeHit(enemy){
 function shoot(){
  const p=player;if(!p.fire||p.shotCD>0||shots.length>=3)return;
  p.shotCD=20;p.muzzle=8;shots.push({x:p.face>0?p.x+p.w+1:p.x-13,y:p.y+p.h*.58,w:12,h:10,vx:p.face*7,vy:environment==='water'?0:-1.2,life:140,dead:false});tone(540,.08,'triangle',.03);
+ return true;
 }
 function updateShots(terrainBlocks){
  for(const s of shots){
@@ -559,7 +569,7 @@ function hud(){
 
 function overlay(title,msg,button,eyebrow){$('portrait').hidden=false;$('leaveSide').hidden=!(mode==='paused'&&story()?.side&&checkpoint?.returnTo);$('title').textContent=title;$('message').textContent=msg;$('start').textContent=button;$('cardEyebrow').textContent=eyebrow||'МАЛЕНЬКА ДОБРА СПРАВА';$('overlay').classList.remove('hidden')}
 function begin(){if(story()){startStoryAction();return}if(mode==='won'&&enemyTrial)switchWorld('meadow',true);if(mode==='paused')mode='playing';else{reset();mode='playing'}$('overlay').classList.add('hidden');$('pause').setAttribute('aria-label','Пауза');last=performance.now();acc=0;if(audio?.state==='suspended')audio.resume();canvas.focus({preventScroll:true});hud()}
-function pause(){if(rescueTime)return;if(mode==='playing'){mode='paused';keys.clear();overlay('Час перевести подих',environment==='water'?'Підводна пригода зачекає. Продовжимо, коли будеш готовий.':'Краплик почекає на тебе тут.','Продовжити →','ТИХА ХВИЛИНКА');$('pause').setAttribute('aria-label','Продовжити');$('start').focus({preventScroll:true})}else if(mode==='paused')begin()}
+function pause(){if(rescueTime)return;if(mode==='playing'){mode='paused';clearControls();overlay('Час перевести подих',environment==='water'?'Підводна пригода зачекає. Продовжимо, коли будеш готовий.':'Краплик почекає на тебе тут.','Продовжити →','ТИХА ХВИЛИНКА');$('pause').setAttribute('aria-label','Продовжити');$('start').focus({preventScroll:true})}else if(mode==='paused')begin()}
 function tone(freq,duration=.1,type='sine',volume=.045){if(muted||!audio)return;try{const o=audio.createOscillator(),g=audio.createGain();o.type=type;o.frequency.setValueAtTime(freq,audio.currentTime);o.frequency.exponentialRampToValueAtTime(freq*.65,audio.currentTime+duration);g.gain.setValueAtTime(volume,audio.currentTime);g.gain.exponentialRampToValueAtTime(.0001,audio.currentTime+duration);o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+duration)}catch{}}
 // Each token is an eighth note. Four notes in a chord give the score room for bass and arpeggios.
 const musicBook=Object.fromEntries(Object.entries({
@@ -683,6 +693,17 @@ fullscreenButton.onclick=async()=>{
 $('start').onclick=startButton;$('restart').onclick=()=>{if(rescueTime)return;if(story()){mode='lost';begin();return}if(enemyTrial)switchWorld('meadow',true);mode='ready';begin()};$('pause').onclick=pause;
 function queueJump(){jumpQueued=true;player.shortHop=false}
 function releaseJump(){if(environment!=='water')player.shortHop=true}
+function touchHeld(key){
+ for(const button of touchPointers.values())if(button.dataset.key===key)return true;
+ return false;
+}
+function held(key){return keys.has(key)||touchHeld(key)}
+function jumpHeld(){return held('Space')||keys.has('ArrowUp')||keys.has('KeyW')}
+function clearControls(){
+ keys.clear();jumpQueued=false;touchJumpTicks=0;touchShotTicks=0;
+ for(const button of touchPointers.values())button.classList.remove('pressed');
+ touchPointers.clear();
+}
 addEventListener('keydown',e=>{
  if(welcomePending){
   if(e.code==='Enter'&&!e.repeat){e.preventDefault();startButton()}
@@ -696,28 +717,43 @@ addEventListener('keydown',e=>{
   return;
  }
  const gameKey=['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space','KeyA','KeyD','KeyW','KeyS','KeyX','KeyJ'].includes(e.code);if(gameKey&&mode==='playing')e.preventDefault();if(['Space','ArrowUp','KeyW'].includes(e.code)&&!keys.has(e.code))queueJump();keys.add(e.code);if(e.repeat)return;if(e.code==='KeyP'||e.code==='Escape')pause();if(e.code==='KeyR'&&!rescueTime)$('restart').click();if(e.code==='Enter'&&mode!=='playing'&&(!e.target?.closest?.('button,a')||e.target.id==='start')){e.preventDefault();startButton()}});
-addEventListener('keyup',e=>{keys.delete(e.code);if(['Space','ArrowUp','KeyW'].includes(e.code))releaseJump()});
-addEventListener('blur',()=>{keys.clear();if(mode==='playing')pause()});
+addEventListener('keyup',e=>{keys.delete(e.code);if(['Space','ArrowUp','KeyW'].includes(e.code)&&!jumpHeld())releaseJump()});
+addEventListener('blur',()=>{if(mode==='playing'&&!rescueTime)pause();else clearControls()});
 document.querySelectorAll('.touch-controls [data-key]').forEach(button=>{
  const {key}=button.dataset;
- let activePointer=null;
  button.onpointerdown=event=>{
-  if(mode!=='playing'||activePointer!==null)return;
+  if(mode!=='playing'||event.button!==0||touchPointers.has(event.pointerId))return;
   event.preventDefault();
-  activePointer=event.pointerId;
-  button.setPointerCapture(activePointer);
-  keys.add(key);
-  if(key==='Space')queueJump();
+  button.setPointerCapture(event.pointerId);
+  touchPointers.set(event.pointerId,button);
+  button.classList.add('pressed');
+  if(key==='Space'){touchJumpTicks=TOUCH_BUFFER_TICKS;player.shortHop=false}
+  if(key==='KeyX')touchShotTicks=TOUCH_BUFFER_TICKS;
+ };
+ if(key==='ArrowLeft'||key==='ArrowRight')button.onpointermove=event=>{
+  const current=touchPointers.get(event.pointerId);
+  if(!current)return;
+  const next=document.elementFromPoint(event.clientX,event.clientY)?.closest('.movement [data-key]');
+  if(!next||next===current)return;
+  touchPointers.set(event.pointerId,next);
+  if(!touchHeld(current.dataset.key))current.classList.remove('pressed');
+  next.classList.add('pressed');
  };
  button.onpointerup=button.onpointercancel=button.onlostpointercapture=event=>{
-  if(event.pointerId!==activePointer)return;
-  activePointer=null;
-  keys.delete(key);
-  if(key==='Space')releaseJump();
+  const current=touchPointers.get(event.pointerId);
+  if(!current)return;
+  touchPointers.delete(event.pointerId);
+  if(touchHeld(current.dataset.key))return;
+  current.classList.remove('pressed');
+  if(key==='Space'){
+   if(!jumpHeld())releaseJump();
+   if(event.type!=='pointerup')touchJumpTicks=0;
+  }
+  if(key==='KeyX'&&event.type!=='pointerup')touchShotTicks=0;
  };
 });
 function burst(x,y,color,count=15,kind='spark'){for(let i=0;i<count;i++)particles.push({x,y,vx:(Math.random()-.5)*5,vy:-Math.random()*4,life:25+Math.random()*20,color,kind})}
-function fail(){if(story()){keys.clear();mode='lost';tone(160,.25);overlay('Ще одна спроба',checkpoint.flag?'Бірюзовий ліхтар світиться. Краплик повернеться до нього.':'Стрічка веде далі. Спробуй цей розділ ще раз.',checkpoint.flag?'Від ліхтаря →':'Спробувати ще →',story().name);return}mode='lost';tone(160,.3,'triangle');burst(player.x+17,player.y+20,'#e89b88',18);overlay(environment==='water'?'Ще один гребок?':'Ще один маленький крок?',environment==='water'?'Плазмопаразит стискається перед ривком. Спробуй обійти його зверху або знизу.':'Краплик не здається. Спробуй ще раз — галявина вже трохи знайоміша!','Спробувати ще ↻','УСЕ ВИЙДЕ')}
+function fail(){clearControls();if(story()){mode='lost';tone(160,.25);overlay('Ще одна спроба',checkpoint.flag?'Бірюзовий ліхтар світиться. Краплик повернеться до нього.':'Стрічка веде далі. Спробуй цей розділ ще раз.',checkpoint.flag?'Від ліхтаря →':'Спробувати ще →',story().name);return}mode='lost';tone(160,.3,'triangle');burst(player.x+17,player.y+20,'#e89b88',18);overlay(environment==='water'?'Ще один гребок?':'Ще один маленький крок?',environment==='water'?'Плазмопаразит стискається перед ривком. Спробуй обійти його зверху або знизу.':'Краплик не здається. Спробуй ще раз — галявина вже трохи знайоміша!','Спробувати ще ↻','УСЕ ВИЙДЕ')}
 function switchWorld(next,trial=false){
  clearWelcome();clearComic();
  chapter=-1;boss=null;rescueTime=0;travel=null;document.body.dataset.pipeControls='false';W=3500;waterFloor[0].w=W;document.body.dataset.story='no';
@@ -725,7 +761,7 @@ function switchWorld(next,trial=false){
  const pipeX=trial&&next==='water'?1150:3260;
  for(const wall of exitPipeWalls)wall.x+=pipeX-exitPipe.x;
  exitPipe.x=pipeX;
- environment=next;mode='ready';keys.clear();buildTerrain();reset();acc=0;last=performance.now();
+ environment=next;mode='ready';clearControls();buildTerrain();reset();acc=0;last=performance.now();
  document.body.dataset.world=next;const water=next==='water';
  $('levelLabel').innerHTML=water?'<b>02</b> ПІДВОДНИЙ ТЕСТ':'<b>01</b> СОНЯЧНА ГАЛЯВИНА';
  $('worldLabel').textContent=water?'ТИХА ГЛИБИНА':'СОНЯЧНА ГАЛЯВИНА';
@@ -743,10 +779,10 @@ function switchWorld(next,trial=false){
 }
 function bubbles(x,y,count=3){for(let i=0;i<count;i++)particles.push({x:x+(Math.random()-.5)*9,y:y+Math.random()*9,vx:(Math.random()-.5)*.5,vy:-.6-Math.random()*.6,life:35+Math.random()*35,kind:'bubble',color:'#b7e1d7'})}
 function swimMotion(move){
- const p=player,up=keys.has('ArrowUp')||keys.has('KeyW')||keys.has('Space'),down=keys.has('ArrowDown')||keys.has('KeyS');
+ const p=player,up=jumpHeld()||touchJumpTicks>0,down=held('ArrowDown')||keys.has('KeyS');
  p.swimCD=Math.max(0,p.swimCD-1);p.stroke=Math.max(0,p.stroke-1);
  p.vx=p.knock>0?p.knockV*.6:p.vx+(move*2.7-p.vx)*.1;if(move)p.face=move;
- if(up&&p.swimCD===0){p.vy=Math.max(-3.2,p.vy-2.25);p.swimCD=18;p.stroke=18;bubbles(p.x+p.w/2-p.face*8,p.y+p.h*.6,3);tone(350,.075,'sine',.015)}
+ if(up&&p.swimCD===0){touchJumpTicks=0;p.vy=Math.max(-3.2,p.vy-2.25);p.swimCD=18;p.stroke=18;bubbles(p.x+p.w/2-p.face*8,p.y+p.h*.6,3);tone(350,.075,'sine',.015)}
  p.vy=Math.max(-3.2,Math.min(down?2.5:1.65,(p.vy+(down?.16:.045))*.987));p.ground=false;p.coyote=0;jumpQueued=false;
  p.swimPhase+=.09+Math.abs(p.vx)*.035+(p.stroke>0?.08:0);const tilt=Math.min(.45,Math.abs(p.vx)*.13)-p.vy*.045;p.tilt+=(tilt-p.tilt)*.1;
  if(t%22===0&&(Math.abs(p.vx)>.5||up))bubbles(p.x+p.w/2-p.face*12,p.y+p.h*.5,1);
@@ -1161,14 +1197,14 @@ function startStoryAction(){
   return;
  }
  if(mode==='lost'){reset();restoreStory()}
- mode='playing';keys.clear();jumpQueued=false;acc=0;last=performance.now();if(audio?.state==='suspended')audio.resume();
+ mode='playing';clearControls();acc=0;last=performance.now();if(audio?.state==='suspended')audio.resume();
  $('overlay').classList.add('hidden');$('pause').setAttribute('aria-label','Пауза');
  canvas.focus({preventScroll:true});hud();
 }
 function nextChapterSave(){return {layout:2,chapter:chapter+1,score,form:player.form,fire:player.fire,invincible:player.invincible,magnet:player.magnet,flag:false}}
 function finishChapter(){
  if(mode!=='playing')return;
- keys.clear();jumpQueued=false;
+ clearControls();
  if(chapter<mainChapters-1){
   mode='between';
   try{localStorage.setItem(saveKey,JSON.stringify(nextChapterSave()))}catch{}
@@ -1200,7 +1236,7 @@ function enterSide(entry){
  travel={kind:entry.type,x:entry.x+entry.w/2,from:foot,to:rise?-8:foot+p.h+10,
   ticks:0,duration:rise?78:36,next:{layout:2,chapter:entry.target,flag:false,score,form:p.form,fire:p.fire,
   magnet:p.magnet,invincible:p.invincible,returnTo:backup}};
- keys.clear();jumpQueued=false;tone(rise?680:270,.28,'triangle');
+ clearControls();tone(rise?680:270,.28,'triangle');
 }
 function completeSide(cleared=true){
  const backup=checkpoint.returnTo;
@@ -1215,12 +1251,12 @@ function completeSide(cleared=true){
 function checkSideEntrance(){
  const entry=sideEntrance(),pipe=currentPipe(),p=player;
  const center=p.x+p.w/2,feet=p.y+p.h;
- const up=keys.has('ArrowUp')||keys.has('KeyW')||keys.has('Space');
- const down=keys.has('ArrowDown')||keys.has('KeyS');
+ const up=jumpHeld();
+ const down=held('ArrowDown')||keys.has('KeyS');
  if(pipe&&p.ground&&Math.abs(feet-pipe.y)<1&&Math.abs(center-pipe.x-pipe.w/2)<22){
   if(story().side==='cave'&&checkpoint.returnTo&&up){
    travel={kind:'exit',x:pipe.x+pipe.w/2,from:feet,to:feet-p.h-12,ticks:0,duration:32};
-   keys.clear();jumpQueued=false;tone(540,.18);return true;
+   clearControls();tone(540,.18);return true;
   }
   if(entry&&!checkpoint.sideCleared&&down){enterSide(entry);return true}
  }
@@ -1261,7 +1297,7 @@ function updateStory(oldY){
  if(p.ground&&oldY+p.h<GROUND-1&&onSpring(p)){
   p.vy=-17.5;p.ground=false;p.coyote=0;springPulse=15;burst(p.x+17,GROUND-7,'#ffe294',15);tone(580,.2);
  }
- if(boss){updateBaron(oldY);if(mode==='playing'&&boss.hp===0&&p.x>=stage.end-95){rescueTime=REUNION_TICKS;keys.clear();p.vx=0;p.vy=0;p.face=1;p.hurt=0;p.ground=true;p.y=GROUND-p.h;}}
+ if(boss){updateBaron(oldY);if(mode==='playing'&&boss.hp===0&&p.x>=stage.end-95){rescueTime=REUNION_TICKS;clearControls();p.vx=0;p.vy=0;p.face=1;p.hurt=0;p.ground=true;p.y=GROUND-p.h;}}
  else if(!stage.side&&environment!=='water'&&p.x>=stage.end)finishChapter();
 }
 const arena={left:chapters[3].end-720,right:chapters[3].end-120};
@@ -1274,7 +1310,7 @@ function updateBaron(oldY){
   if(score<BARON_DROP_TARGET){
    const speedBoost=15;
    b.hp=b.maxHp=6;b.speedMultiplier=1+speedBoost/100;
-   mode='paused';keys.clear();jumpQueued=false;
+   mode='paused';clearControls();
    overlay('Барон Згусток','«У тебе '+score+' з '+BARON_DROP_TARGET+' краплинок. Бракує ще '+(BARON_DROP_TARGET-score)+'. А тепер спробуй мене наздогнати!»\nБарон мчить на '+speedBoost+'% швидше й витримає '+b.maxHp+' влучань згори.','До бою →','ВИКЛИК БАРОНА');
    $('portrait').hidden=true;$('pause').setAttribute('aria-label','Продовжити');
    $('start').focus({preventScroll:true});hud();
@@ -1303,7 +1339,7 @@ function updateBaron(oldY){
 }
 function finishLevel(){
  if(story()){finishChapter();return}
- mode='won';for(let i=0;i<80;i++)particles.push({x:cam+Math.random()*viewW,y:Math.random()*200,vx:(Math.random()-.5)*3,vy:Math.random()*2-1,life:160+Math.random()*90,color:['#e9908a','#eccd7e','#a6c98b','#f9edbd'][i%4],kind:'confetti'});tone(950,.5);overlay(environment==='water'?'Підводну пригоду завершено!':'Добра справа — зроблена!',environment==='water'?'Краплик піднявся до виходу прозорою трубою й зібрав '+score+' краплинок.':'Краплик приніс до станції '+score+' краплинок. Уважність і добра справа — чудове поєднання!','Ще одна пригода ↻','ТИ — МАЛЕНЬКИЙ ГЕРОЙ')
+ clearControls();mode='won';for(let i=0;i<80;i++)particles.push({x:cam+Math.random()*viewW,y:Math.random()*200,vx:(Math.random()-.5)*3,vy:Math.random()*2-1,life:160+Math.random()*90,color:['#e9908a','#eccd7e','#a6c98b','#f9edbd'][i%4],kind:'confetti'});tone(950,.5);overlay(environment==='water'?'Підводну пригоду завершено!':'Добра справа — зроблена!',environment==='water'?'Краплик піднявся до виходу прозорою трубою й зібрав '+score+' краплинок.':'Краплик приніс до станції '+score+' краплинок. Уважність і добра справа — чудове поєднання!','Ще одна пригода ↻','ТИ — МАЛЕНЬКИЙ ГЕРОЙ')
 }
 function ascendExitPipe(){
  const p=player;
@@ -1329,16 +1365,19 @@ function update(){
   return;
  }
  t++;const p=player;
+ if(touchJumpTicks>0)touchJumpTicks--;
+ if(touchShotTicks>0)touchShotTicks--;
  if(story()?.side==='cave'&&checkSideEntrance())return;
  if(p.inExitPipe){ascendExitPipe();return}
  for(const key of ['hurt','shotCD','muzzle','transform','knock','slow','magnet'])p[key]=Math.max(0,p[key]-1);
  if(p.invincible>0)p.invincible--;
  specialBlocks.forEach(b=>{b.bump=Math.max(0,b.bump-1);if(b.coinTimer>0)b.coinTimer--});resizeHero();
  const oldY=p.y,wasGround=p.ground,terrainBlocks=solids();
- const move=(keys.has('ArrowRight')||keys.has('KeyD')?1:0)-(keys.has('ArrowLeft')||keys.has('KeyA')?1:0);
+ const move=(held('ArrowRight')||keys.has('KeyD')?1:0)-(held('ArrowLeft')||keys.has('KeyA')?1:0);
  if(environment==='water')swimMotion(move);
  else {p.vx=p.knock>0?p.knockV:move*(p.slow>0?2.3:4.1);if(move&&p.knock===0)p.face=move;p.coyote=p.ground?6:Math.max(0,p.coyote-1);
- if(jumpQueued&&p.coyote>0){
+ if((jumpQueued||touchJumpTicks>0)&&p.coyote>0){
+  touchJumpTicks=0;
   const spring=onSpring(p);p.vy=spring?-17.5:-12.4;
   p.cutAbove=p.y-(spring?207:100);if(spring)springPulse=15;p.ground=false;p.coyote=0;p.squash=-.15;burst(p.x+p.w/2,p.y+p.h,'#e3d6a5',7,'dust');tone(460,.16,'triangle',.035)}jumpQueued=false;
  if(p.vy>=0)p.cutAbove=null;
@@ -1370,7 +1409,8 @@ function update(){
   }
  }
  const activeTerrain=solids();updatePickups(activeTerrain);
- if(keys.has('KeyX')||keys.has('KeyJ'))shoot();updateShots(activeTerrain);
+ if((held('KeyX')||keys.has('KeyJ')||touchShotTicks>0)&&shoot())touchShotTicks=0;
+ updateShots(activeTerrain);
  for(const e of enemies){
   if(!e.alive)continue;if(e.species==='plasma')updatePlasma(e,activeTerrain);else updateLandEnemy(e,activeTerrain);
   if(!e.alive)continue;
@@ -2152,7 +2192,7 @@ function clearComic(){
  comic=null;$('comicCard').hidden=true;$('overlay').dataset.comic='false';
 }
 function showComic(kind){
- comic={kind,page:0};keys.clear();jumpQueued=false;
+ comic={kind,page:0};clearControls();
  $('comicCard').hidden=false;$('overlay').dataset.comic='true';
  $('overlay').classList.remove('hidden');paintComic();$('comicNext').focus({preventScroll:true});
 }
